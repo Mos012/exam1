@@ -9,31 +9,44 @@ body{font-family:Tahoma;background:#1a1a2e;color:#fff;padding:20px}
 button{background:#e94560;color:#fff;border:none;padding:12px 24px;margin:10px;border-radius:8px;cursor:pointer}
 button:disabled{background:#555;cursor:not-allowed}
 #timer{font-size:48px;margin:20px;color:#e94560;text-align:center;font-weight:bold}
-#status{margin:20px;padding:10px;border-radius:8px;background:#0f3460}
+#status{margin:20px;padding:10px;border-radius:8px}
 .warning{background:#e94560;padding:10px;border-radius:8px;margin:10px 0;text-align:center}
 .success{background:#4CAF50;padding:10px;border-radius:8px;margin:10px 0;text-align:center}
+.info{background:#2196F3;padding:10px;border-radius:8px;margin:10px 0;text-align:center}
 .progress-bar{width:0%;height:10px;background:#4CAF50;transition:width 0.3s;border-radius:5px}
+video{width:100%;max-width:400px;margin:10px auto;border-radius:10px;background:#000}
 </style>
 </head>
 <body>
 <div class="container">
-<h2>🎥 ضبط صفحه با صدا</h2>
+<h2>🎥 آزمون عملی</h2>
 <div id="info"></div>
-<div class="warning">
-⚠️ قبل از شروع ضبط، مطمئن شوید:<br>
-• مرورگر اجازه دسترسی به میکروفون را دارد<br>
-• در حین ضبط، گزینه "اشتراک‌گذاری صدا" را فعال کنید
+
+<div id="step1" class="info">
+    <strong>مرحله 1:</strong> ابتدا دکمه "درخواست دسترسی" را بزنید
+</div>
+<div id="step2" style="display:none;" class="info">
+    <strong>مرحله 2:</strong> بعد از دیدن تصویر وب‌کم، دکمه "شروع ضبط" را بزنید
 </div>
 
-<div id="timer">۰۰:۰۰</div>
-<div id="status">✅ آماده شروع</div>
-<div class="progress-bar" id="progress-bar"></div>
+<div id="previewArea" style="display:none;">
+    <h4>📹 پیش‌نمایش وب‌کم:</h4>
+    <video id="webcamPreview" autoplay muted playsinline></video>
+</div>
 
-<button id="startBtn" onclick="startRecording()">🎬 شروع ضبط صفحه با صدا</button>
+<div id="timer" style="display:none;">۰۰:۰۰</div>
+<div id="status"></div>
+<div class="progress-bar" id="progress-bar" style="display:none;"></div>
+
+<button id="permBtn" onclick="requestPermissions()">🎤📹 درخواست دسترسی به میکروفون و وب‌کم</button>
+<button id="startBtn" onclick="startRecording()" style="display:none;">🎬 شروع ضبط صفحه</button>
 <button id="stopBtn" onclick="stopRecording()" style="display:none;">⏹️ پایان و ارسال</button>
 </div>
 
 <script>
+// ========== تنظیمات - آدرس Worker خود را اینجا وارد کنید ==========
+const WORKER_URL = "https://exam-worker.mos62013.workers.dev"; // ⚠️ این را تغییر دهید
+
 // دریافت پارامترها از URL
 const params = new URLSearchParams(window.location.search);
 const examId = params.get('exam_id');
@@ -42,50 +55,85 @@ const studentName = decodeURIComponent(params.get('name') || 'کاربر');
 const token = params.get('token');
 const ts = params.get('ts');
 
-// آدرس Worker شما - این را با آدرس واقعی Worker خود جایگزین کنید
-const WORKER_URL = "https://exam-worker.mos62013.workers.dev";
-
 document.getElementById('info').innerHTML = '<h3>👤 ' + studentName + '</h3><p>📚 آزمون ' + examId + '</p>';
 
 let mediaRecorder, chunks = [], seconds = 0, timerInterval;
 let screenStream = null;
+let webcamStream = null;
+let finalStream = null;
 
-// ========== شروع ضبط صفحه با صدا ==========
-async function startRecording() {
+// ========== مرحله 1: دریافت دسترسی میکروفون و وب‌کم ==========
+async function requestPermissions() {
     try {
-        document.getElementById('status').innerHTML = '⏳ درخواست دسترسی به صفحه نمایش...';
+        document.getElementById('status').innerHTML = '<div class="info">⏳ درخواست دسترسی...</div>';
         
-        // دریافت دسترسی به صفحه نمایش با صدا
-        // نکته مهم: وقتی پنجره انتخاب باز شد، حتماً گزینه "اشتراک‌گذاری صدا" را فعال کنید
-        screenStream = await navigator.mediaDevices.getDisplayMedia({
-            video: { 
-                width: { ideal: 854 }, 
-                height: { ideal: 480 }, 
-                frameRate: { ideal: 15 } 
-            },
-            audio: true  // این گزینه باید true باشد تا صدا ضبط شود
+        // دریافت دسترسی به وب‌کم و میکروفون
+        webcamStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 320 }, height: { ideal: 240 } },
+            audio: true
         });
         
-        mediaRecorder = new MediaRecorder(screenStream, { 
+        // نمایش پیش‌نمایش وب‌کم
+        const preview = document.getElementById('webcamPreview');
+        preview.srcObject = webcamStream;
+        document.getElementById('previewArea').style.display = 'block';
+        
+        document.getElementById('step1').style.display = 'none';
+        document.getElementById('step2').style.display = 'block';
+        document.getElementById('status').innerHTML = '<div class="success">✅ دسترسی به میکروفون و وب‌کم داده شد!</div>';
+        document.getElementById('permBtn').style.display = 'none';
+        document.getElementById('startBtn').style.display = 'inline-block';
+        
+    } catch(err) {
+        document.getElementById('status').innerHTML = '<div class="warning">❌ خطا: ' + err.message + '<br>لطفاً دسترسی‌ها را در مرورگر فعال کنید.</div>';
+    }
+}
+
+// ========== مرحله 2: شروع ضبط صفحه + ترکیب با وب‌کم و صدا ==========
+async function startRecording() {
+    try {
+        document.getElementById('status').innerHTML = '<div class="info">⏳ درخواست دسترسی به صفحه نمایش...</div>';
+        
+        // دریافت صفحه نمایش (بدون صدا چون صدا را از وب‌کم می‌گیریم)
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: { width: { ideal: 854 }, height: { ideal: 480 }, frameRate: { ideal: 15 } },
+            audio: false  // صدا از وب‌کم می‌آید
+        });
+        
+        // ترکیب ویدیوی صفحه + ویدیوی وب‌کم + صدای میکروفون
+        const tracks = [];
+        
+        // ویدیوی صفحه
+        tracks.push(...screenStream.getVideoTracks());
+        
+        // ویدیوی وب‌کم (اختیاری - اگر وب‌کم نمی‌خواهید این خط را حذف کنید)
+        if (webcamStream) {
+            tracks.push(...webcamStream.getVideoTracks());
+        }
+        
+        // صدای میکروفون (از وب‌کم)
+        if (webcamStream) {
+            tracks.push(...webcamStream.getAudioTracks());
+        }
+        
+        finalStream = new MediaStream(tracks);
+        
+        mediaRecorder = new MediaRecorder(finalStream, { 
             mimeType: 'video/webm',
-            videoBitsPerSecond: 500000
+            videoBitsPerSecond: 800000
         });
         chunks = [];
         
-        mediaRecorder.ondataavailable = (e) => { 
-            if(e.data.size) chunks.push(e.data); 
-        };
+        mediaRecorder.ondataavailable = (e) => { if(e.data.size) chunks.push(e.data); };
         
         mediaRecorder.onstop = () => {
             const blob = new Blob(chunks, { type: 'video/webm' });
             if (blob.size > 20 * 1024 * 1024) {
-                document.getElementById('status').innerHTML = '❌ حجم فیلم از 20 مگابایت بیشتر است! لطفاً کمتر از 5 دقیقه ضبط کنید.';
+                document.getElementById('status').innerHTML = '<div class="warning">❌ حجم فیلم از 20 مگابایت بیشتر است!</div>';
                 return;
             }
             uploadVideo(blob);
-            if (screenStream) {
-                screenStream.getTracks().forEach(track => track.stop());
-            }
+            stopAllStreams();
         };
         
         mediaRecorder.start(1000);
@@ -93,7 +141,9 @@ async function startRecording() {
         
         document.getElementById('startBtn').style.display = 'none';
         document.getElementById('stopBtn').style.display = 'inline-block';
-        document.getElementById('status').innerHTML = '🔴 در حال ضبط صفحه با صدا... (حداکثر ۵ دقیقه)';
+        document.getElementById('timer').style.display = 'block';
+        document.getElementById('progress-bar').style.display = 'block';
+        document.getElementById('status').innerHTML = '<div class="success">🔴 در حال ضبط صفحه + صدا + وب‌کم... (حداکثر ۵ دقیقه)</div>';
         
         // توقف خودکار بعد از 5 دقیقه
         setTimeout(() => {
@@ -112,8 +162,7 @@ async function startRecording() {
         }
         
     } catch(err) {
-        document.getElementById('status').innerHTML = '❌ خطا: ' + err.message;
-        console.error(err);
+        document.getElementById('status').innerHTML = '<div class="warning">❌ خطا: ' + err.message + '</div>';
     }
 }
 
@@ -134,8 +183,14 @@ function stopRecording() {
     if(mediaRecorder && mediaRecorder.state === 'recording') {
         mediaRecorder.stop();
         clearInterval(timerInterval);
-        document.getElementById('status').innerHTML = '⏳ در حال ارسال فیلم...';
+        document.getElementById('status').innerHTML = '<div class="info">⏳ در حال ارسال فیلم...</div>';
     }
+}
+
+function stopAllStreams() {
+    if (screenStream) screenStream.getTracks().forEach(t => t.stop());
+    if (webcamStream) webcamStream.getTracks().forEach(t => t.stop());
+    if (finalStream) finalStream.getTracks().forEach(t => t.stop());
 }
 
 async function uploadVideo(blob) {
@@ -156,19 +211,19 @@ async function uploadVideo(blob) {
     };
     xhr.onload = () => {
         if(xhr.status === 200) {
-            document.getElementById('status').innerHTML = '✅ فیلم با موفقیت ارسال شد! صفحه را ببندید.';
+            document.getElementById('status').innerHTML = '<div class="success">✅ فیلم با موفقیت ارسال شد! صفحه را ببندید.</div>';
             document.getElementById('stopBtn').style.display = 'none';
         } else {
             try {
                 const resp = JSON.parse(xhr.responseText);
-                document.getElementById('status').innerHTML = '❌ خطا: ' + (resp.error || 'مشکل در ارسال');
+                document.getElementById('status').innerHTML = '<div class="warning">❌ خطا: ' + (resp.error || 'مشکل در ارسال') + '</div>';
             } catch(e) {
-                document.getElementById('status').innerHTML = '❌ خطا در ارسال فیلم';
+                document.getElementById('status').innerHTML = '<div class="warning">❌ خطا در ارسال فیلم</div>';
             }
         }
     };
     xhr.onerror = () => {
-        document.getElementById('status').innerHTML = '❌ خطای شبکه';
+        document.getElementById('status').innerHTML = '<div class="warning">❌ خطای شبکه</div>';
     };
     xhr.open('POST', WORKER_URL + '/upload');
     xhr.send(formData);
