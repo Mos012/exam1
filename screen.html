@@ -1,198 +1,226 @@
-<!DOCTYPE html>
+const RECORD_PAGE = `<!DOCTYPE html>
 <html dir="rtl" lang="fa">
 <head>
-    <meta charset="UTF-8">
-    <title>ضبط صفحه - آزمون عملی</title>
-    <style>
-        body { font-family: Tahoma; background: #1a1a2e; color: white; padding: 20px; }
-        .container { max-width: 800px; margin: auto; background: #16213e; padding: 20px; border-radius: 15px; }
-        button { background: #e94560; color: white; border: none; padding: 12px 24px; margin: 10px; border-radius: 8px; cursor: pointer; }
-        #status { margin: 20px; padding: 10px; border-radius: 8px; }
-        #timer { font-size: 32px; font-weight: bold; margin: 20px; color: #e94560; text-align: center; }
-        .recording { animation: pulse 1s infinite; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
-        .progress-bar { width: 0%; height: 10px; background: #4CAF50; transition: width 0.3s; border-radius: 5px; }
-        .question-card { background: #0f3460; margin: 15px 0; padding: 15px; border-radius: 10px; }
-        textarea { width: 100%; padding: 8px; margin: 5px 0; border-radius: 5px; }
-    </style>
+<meta charset="UTF-8">
+<title>ضبط صفحه - آزمون عملی</title>
+<style>
+body{font-family:Tahoma;background:#1a1a2e;color:#fff;padding:20px}
+.container{max-width:800px;margin:auto;background:#16213e;padding:20px;border-radius:15px}
+button{background:#e94560;color:#fff;border:none;padding:12px 24px;margin:10px;border-radius:8px;cursor:pointer}
+button:disabled{background:#555;cursor:not-allowed}
+#timer{font-size:48px;margin:20px;color:#e94560;text-align:center;font-weight:bold}
+#status{margin:20px;padding:10px;border-radius:8px;background:#0f3460}
+.warning{background:#e94560;padding:10px;border-radius:8px;margin:10px 0;text-align:center}
+.success{background:#4CAF50;padding:10px;border-radius:8px;margin:10px 0;text-align:center}
+.progress-bar{width:0%;height:10px;background:#4CAF50;transition:width 0.3s;border-radius:5px}
+.video-preview{width:100%;max-width:400px;margin:10px auto;border-radius:10px;background:#000}
+</style>
 </head>
 <body>
 <div class="container">
-    <h2>🎥 ضبط صفحه برای آزمون</h2>
-    <div id="info"></div>
-    <div id="questions-area"></div>
-    <div id="timer">۰۰:۰۰</div>
-    <div id="status">✅ آماده شروع</div>
-    <div class="progress-bar" id="progress-bar"></div>
-    <button id="startBtn" onclick="startExam()">🎬 شروع ضبط</button>
-    <button id="stopBtn" onclick="stopRecording()" style="display:none;">⏹️ پایان و ارسال</button>
+<h2>🎥 ضبط صفحه + صدا + وب‌کم</h2>
+<div id="info"></div>
+<div class="warning">
+⚠️ ابتدا به همه درخواست‌های دسترسی اجازه دهید<br>
+🎤 میکروفون | 📹 وب‌کم | 🖥️ صفحه نمایش
+</div>
+
+<div id="permissionStatus"></div>
+
+<div id="previewArea" style="display:none;">
+    <h4>📹 پیش‌نمایش وب‌کم:</h4>
+    <video id="webcamPreview" class="video-preview" autoplay muted playsinline></video>
+</div>
+
+<div id="timer">۰۰:۰۰</div>
+<div id="status">✅ مرحله 1: ابتدا دسترسی‌ها را فعال کنید</div>
+<div class="progress-bar" id="progress-bar"></div>
+
+<button id="permBtn" onclick="requestPermissions()">🎤📹 درخواست دسترسی به میکروفون و وب‌کم</button>
+<button id="startBtn" onclick="startRecording()" style="display:none;">🎬 شروع ضبط صفحه</button>
+<button id="stopBtn" onclick="stopRecording()" style="display:none;">⏹️ پایان و ارسال</button>
 </div>
 
 <script>
-    // ⚠️ این آدرس را بعد از دیپلوی Worker جایگزین کنید
-    const WORKER_URL = "https://your-worker.workers.dev";
-    
-    let mediaRecorder, chunks = [], seconds = 0, timerInterval;
-    let uploadUrl, fileKey, examId, studentName, userId;
-    let questions = [];
-    
-    const params = new URLSearchParams(window.location.search);
-    examId = params.get('exam_id');
-    userId = params.get('user_id');
-    studentName = decodeURIComponent(params.get('name') || '');
-    const token = params.get('token');
-    const ts = params.get('ts');
-    
-    document.getElementById('info').innerHTML = `<h3>👤 ${studentName}</h3><p>📚 آزمون ${examId}</p>`;
-    
-    // دریافت سوالات از Worker
-    async function loadQuestions() {
-        const resp = await fetch(`${WORKER_URL}/api/questions?exam_id=${examId}`);
-        if (resp.ok) {
-            questions = await resp.json();
-            const container = document.getElementById('questions-area');
-            container.innerHTML = '<h4>📝 پاسخ سوالات را بنویسید:</h4>';
-            for (let i = 0; i < questions.length; i++) {
-                const q = questions[i];
-                container.innerHTML += `
-                    <div class="question-card">
-                        <p><strong>${i+1}. ${q.text}</strong></p>
-                        ${q.type === 'testi' ? `
-                            ${q.options.map((opt, idx) => `
-                                <label><input type="radio" name="q_${q.id}" value="${opt}"> ${opt}</label><br>
-                            `).join('')}
-                        ` : `
-                            <textarea id="ans_${q.id}" rows="2" placeholder="پاسخ خود را بنویسید..."></textarea>
-                        `}
-                    </div>
-                `;
-            }
-        }
-    }
-    
-    async function verifyToken() {
-        const resp = await fetch(`${WORKER_URL}/api/verify`, {
-            method: "POST",
-            body: JSON.stringify({ user_id: userId, token, ts })
-        });
-        const data = await resp.json();
-        if (!data.valid) {
-            document.getElementById('status').innerHTML = `❌ ${data.error}`;
-            document.getElementById('startBtn').disabled = true;
-        }
-        return data.valid;
-    }
-    
-    async function getUploadUrl() {
-        const resp = await fetch(`${WORKER_URL}/api/get-upload-url`, {
-            method: "POST",
-            body: JSON.stringify({ user_id: userId, token, ts, exam_id: examId, student_name: studentName })
-        });
-        const data = await resp.json();
-        uploadUrl = data.uploadUrl;
-        fileKey = data.fileKey;
-        return !!uploadUrl;
-    }
-    
-    function collectAnswers() {
-        const answers = {};
-        for (const q of questions) {
-            if (q.type === 'testi') {
-                const selected = document.querySelector(`input[name="q_${q.id}"]:checked`);
-                if (selected) answers[q.id] = selected.value;
-            } else {
-                const answer = document.getElementById(`ans_${q.id}`)?.value;
-                if (answer) answers[q.id] = answer;
-            }
-        }
-        return answers;
-    }
-    
-    async function startExam() {
-        await loadQuestions();
-        const valid = await verifyToken();
-        if (!valid) return;
+let mediaRecorder, chunks = [], seconds = 0, timerInterval;
+let screenStream = null;
+let webcamStream = null;
+let micStream = null;
+let combinedStream = null;
+
+const WORKER_URL = window.location.origin;
+const params = new URLSearchParams(window.location.search);
+const examId = params.get('exam_id');
+const userId = params.get('user_id');
+const studentName = decodeURIComponent(params.get('name') || 'کاربر');
+const token = params.get('token');
+const ts = params.get('ts');
+
+document.getElementById('info').innerHTML = '<h3>👤 ' + studentName + '</h3><p>📚 آزمون ' + examId + '</p>';
+
+// ========== مرحله 1: دریافت دسترسی به میکروفون و وب‌کم ==========
+async function requestPermissions() {
+    try {
+        document.getElementById('permissionStatus').innerHTML = '<div class="warning">⏳ درخواست دسترسی به میکروفون و وب‌کم...</div>';
         
-        const hasUrl = await getUploadUrl();
-        if (!hasUrl) return;
+        // دریافت دسترسی به میکروفون و وب‌کم
+        webcamStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: "user" },
+            audio: true
+        });
         
-        await startRecording();
+        // نمایش پیش‌نمایش وب‌کم
+        const preview = document.getElementById('webcamPreview');
+        preview.srcObject = webcamStream;
+        document.getElementById('previewArea').style.display = 'block';
+        
+        document.getElementById('permissionStatus').innerHTML = '<div class="success">✅ دسترسی به میکروفون و وب‌کم داده شد!</div>';
+        document.getElementById('status').innerHTML = '✅ مرحله 2: حالا دکمه "شروع ضبط" را بزنید';
+        document.getElementById('permBtn').style.display = 'none';
+        document.getElementById('startBtn').style.display = 'inline-block';
+        
+    } catch(err) {
+        document.getElementById('permissionStatus').innerHTML = '<div class="warning">❌ خطا: ' + err.message + '<br>لطفاً دسترسی‌ها را در مرورگر فعال کنید.</div>';
+    }
+}
+
+// ========== مرحله 2: شروع ضبط صفحه + ترکیب با صدا و وب‌کم ==========
+async function startRecording() {
+    try {
+        document.getElementById('status').innerHTML = '⏳ درخواست دسترسی به صفحه نمایش...';
+        
+        // دریافت دسترسی به صفحه نمایش (با صدا)
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: { width: { ideal: 854 }, height: { ideal: 480 }, frameRate: { ideal: 15 } },
+            audio: true
+        });
+        
+        // ترکیب همه استریم‌ها: صفحه + وب‌کم + میکروفون
+        const tracks = [];
+        
+        // اضافه کردن ویدیوی صفحه
+        tracks.push(...screenStream.getVideoTracks());
+        
+        // اضافه کردن ویدیوی وب‌کم (اختیاری، می‌توانید حذف کنید)
+        if (webcamStream) {
+            tracks.push(...webcamStream.getVideoTracks());
+        }
+        
+        // اضافه کردن صدای میکروفون (از وب‌کم استریم می‌آید)
+        if (webcamStream) {
+            tracks.push(...webcamStream.getAudioTracks());
+        }
+        
+        // اگر صفحه صدای جداگانه داشت (مثل فیلم در حال پخش)
+        tracks.push(...screenStream.getAudioTracks());
+        
+        combinedStream = new MediaStream(tracks);
+        
+        mediaRecorder = new MediaRecorder(combinedStream, { 
+            mimeType: 'video/webm',
+            videoBitsPerSecond: 800000  // 800 kbps
+        });
+        chunks = [];
+        
+        mediaRecorder.ondataavailable = (e) => { if(e.data.size) chunks.push(e.data); };
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(chunks, { type: 'video/webm' });
+            if (blob.size > 20 * 1024 * 1024) {
+                document.getElementById('status').innerHTML = '❌ حجم فیلم از 20 مگابایت بیشتر است! لطفاً کمتر از 5 دقیقه ضبط کنید.';
+                return;
+            }
+            uploadVideo(blob);
+            stopAllStreams();
+        };
+        
+        mediaRecorder.start(1000);
+        startTimer();
+        
         document.getElementById('startBtn').style.display = 'none';
         document.getElementById('stopBtn').style.display = 'inline-block';
-    }
-    
-    async function startRecording() {
-        try {
-            const stream = await navigator.mediaDevices.getDisplayMedia({
-                video: { width: { ideal: 854 }, height: { ideal: 480 }, frameRate: { ideal: 10 } },
-                audio: true
-            });
-            
-            mediaRecorder = new MediaRecorder(stream, { videoBitsPerSecond: 500000 });
-            chunks = [];
-            mediaRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-            mediaRecorder.onstop = () => {
-                const blob = new Blob(chunks, { type: 'video/webm' });
-                uploadVideo(blob);
-                stream.getTracks().forEach(t => t.stop());
-            };
-            mediaRecorder.start(1000);
-            startTimer();
-            document.getElementById('status').innerHTML = '🔴 در حال ضبط...';
-            document.getElementById('status').classList.add('recording');
-            
-        } catch (err) {
-            document.getElementById('status').innerHTML = `❌ ${err.message}`;
-        }
-    }
-    
-    function startTimer() {
-        seconds = 0;
-        timerInterval = setInterval(() => {
-            seconds++;
-            const mins = Math.floor(seconds / 60);
-            const secs = seconds % 60;
-            document.getElementById('timer').innerText = `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
-        }, 1000);
-    }
-    
-    function stopRecording() {
-        if (mediaRecorder?.state === 'recording') {
-            mediaRecorder.stop();
-            clearInterval(timerInterval);
-            document.getElementById('status').innerHTML = '⏳ در حال ارسال...';
-        }
-    }
-    
-    async function uploadVideo(blob) {
-        const answers = collectAnswers();
+        document.getElementById('status').innerHTML = '🔴 در حال ضبط صفحه + صدا + وب‌کم... (حداکثر ۵ دقیقه)';
         
-        const xhr = new XMLHttpRequest();
-        xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) {
-                const percent = (e.loaded / e.total) * 100;
-                document.getElementById('progress-bar').style.width = percent + '%';
+        // توقف خودکار بعد از 5 دقیقه
+        setTimeout(() => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                stopRecording();
+            }
+        }, 300000);
+        
+        // اگر کاربر پنجره اشتراک‌گذاری را ببندد
+        screenStream.getVideoTracks()[0].onended = () => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                stopRecording();
             }
         };
-        xhr.onload = async () => {
-            if (xhr.status === 200) {
-                await fetch(`${WORKER_URL}/api/upload-complete`, {
-                    method: "POST",
-                    body: JSON.stringify({
-                        fileKey, user_id: userId, token, ts,
-                        exam_id: examId, student_name: studentName,
-                        answers: answers, videoSize: blob.size
-                    })
-                });
-                document.getElementById('status').innerHTML = '✅ فیلم ارسال شد! صفحه را ببندید.';
-                document.getElementById('stopBtn').style.display = 'none';
-            } else {
-                document.getElementById('status').innerHTML = '❌ خطا در ارسال';
-            }
-        };
-        xhr.open('PUT', uploadUrl);
-        xhr.send(blob);
+        
+    } catch(err) {
+        document.getElementById('status').innerHTML = '❌ خطا: ' + err.message;
     }
+}
+
+function startTimer() {
+    seconds = 0;
+    timerInterval = setInterval(() => {
+        seconds++;
+        let mins = Math.floor(seconds / 60);
+        let secs = seconds % 60;
+        document.getElementById('timer').innerText = mins.toString().padStart(2,'0') + ':' + secs.toString().padStart(2,'0');
+        if (seconds >= 300) {
+            document.getElementById('timer').style.color = '#e94560';
+        }
+    }, 1000);
+}
+
+function stopRecording() {
+    if(mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        clearInterval(timerInterval);
+        document.getElementById('status').innerHTML = '⏳ در حال ارسال فیلم...';
+    }
+}
+
+function stopAllStreams() {
+    if (screenStream) screenStream.getTracks().forEach(t => t.stop());
+    if (webcamStream) webcamStream.getTracks().forEach(t => t.stop());
+    if (combinedStream) combinedStream.getTracks().forEach(t => t.stop());
+}
+
+async function uploadVideo(blob) {
+    const formData = new FormData();
+    formData.append('video', blob, 'recording.webm');
+    formData.append('exam_id', examId);
+    formData.append('user_id', userId);
+    formData.append('student_name', studentName);
+    formData.append('token', token);
+    formData.append('ts', ts);
+    
+    const xhr = new XMLHttpRequest();
+    xhr.upload.onprogress = (e) => {
+        if(e.lengthComputable) {
+            const percent = (e.loaded / e.total) * 100;
+            document.getElementById('progress-bar').style.width = percent + '%';
+        }
+    };
+    xhr.onload = () => {
+        if(xhr.status === 200) {
+            document.getElementById('status').innerHTML = '✅ فیلم با موفقیت ارسال شد! صفحه را ببندید.';
+            document.getElementById('stopBtn').style.display = 'none';
+        } else {
+            try {
+                const resp = JSON.parse(xhr.responseText);
+                document.getElementById('status').innerHTML = '❌ خطا: ' + (resp.error || 'مشکل در ارسال');
+            } catch(e) {
+                document.getElementById('status').innerHTML = '❌ خطا در ارسال فیلم';
+            }
+        }
+    };
+    xhr.onerror = () => {
+        document.getElementById('status').innerHTML = '❌ خطای شبکه';
+    };
+    xhr.open('POST', WORKER_URL + '/upload');
+    xhr.send(formData);
+}
 </script>
 </body>
-  </html>
+</html>`;
