@@ -2,7 +2,7 @@
 <html dir="rtl" lang="fa">
 <head>
     <meta charset="UTF-8">
-    <title>ضبط صفحه - آزمون عملی</title>
+    <title>آزمون عملی - ضبط صفحه</title>
     <style>
         body {
             font-family: Tahoma;
@@ -18,6 +18,25 @@
             padding: 20px;
             border-radius: 15px;
         }
+        .workshop-card {
+            background: #0f3460;
+            margin: 15px 0;
+            padding: 15px;
+            border-radius: 10px;
+        }
+        .question {
+            margin: 10px 0;
+            padding: 10px;
+            background: #1a1a2e;
+            border-radius: 8px;
+        }
+        textarea {
+            width: 100%;
+            padding: 8px;
+            border-radius: 5px;
+            margin-top: 5px;
+            font-family: Tahoma;
+        }
         button {
             background: #e94560;
             color: white;
@@ -28,14 +47,10 @@
             cursor: pointer;
             font-size: 16px;
         }
-        button:disabled {
-            background: #555;
-            cursor: not-allowed;
-        }
-        .step1 { background: #2196F3; }
-        .step2 { background: #4CAF50; }
-        .stop { background: #e94560; }
-        #timer {
+        .success-btn { background: #4CAF50; }
+        .danger-btn { background: #e94560; }
+        .info-btn { background: #2196F3; }
+        .timer {
             font-size: 48px;
             text-align: center;
             margin: 20px;
@@ -49,45 +64,58 @@
             transition: width 0.3s;
             border-radius: 5px;
         }
-        .info {
-            text-align: center;
+        .status {
             padding: 10px;
             margin: 10px 0;
             border-radius: 8px;
+            text-align: center;
         }
+        .step { background: #2196F3; }
         .success { background: #4CAF50; }
         .warning { background: #e94560; }
-        .blue { background: #2196F3; }
+        .webcam-preview {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 160px;
+            height: 120px;
+            border-radius: 10px;
+            border: 3px solid #e94560;
+            z-index: 9999;
+            background: black;
+        }
     </style>
 </head>
 <body>
 <div class="container">
     <h2>🎥 آزمون عملی</h2>
-    <div id="info"></div>
+    <div id="studentInfo"></div>
     
-    <div id="step1Div" class="info blue">
-        📌 مرحله 1: روی دکمه "درخواست دسترسی" کلیک کنید
+    <!-- نمایش کارگاه فعلی -->
+    <div id="workshopContainer"></div>
+    
+    <!-- بخش ضبط -->
+    <div id="recordingSection" style="display:none;">
+        <div class="timer" id="timer">۰۰:۰۰</div>
+        <div class="progress" id="progressBar"></div>
+        <div class="status" id="recordingStatus">🔴 در حال ضبط...</div>
+        <button id="stopRecordBtn" class="danger-btn">⏹️ پایان ضبط و ارسال</button>
     </div>
     
-    <div id="step2Div" style="display:none;" class="info success">
-        ✅ مرحله 2: روی دکمه "شروع ضبط" کلیک کنید
+    <!-- بخش بعد از اتمام -->
+    <div id="nextSection" style="display:none; text-align:center;">
+        <div class="status success">✅ ارسال شد!</div>
+        <button id="nextWorkshopBtn" class="success-btn">➡️ کارگاه بعدی</button>
     </div>
     
-    <div id="timer" style="display:none;">۰۰:۰۰</div>
-    <div id="status" class="info"></div>
-    <div class="progress" id="progressBar"></div>
-    
-    <div style="text-align:center;">
-        <button id="permBtn" class="step1">🎤 درخواست دسترسی به میکروفون و وبکم</button>
-        <button id="startBtn" style="display:none;" class="step2">🎬 شروع ضبط صفحه</button>
-        <button id="stopBtn" style="display:none;" class="stop">⏹️ پایان و ارسال</button>
+    <div id="completeSection" style="display:none; text-align:center;">
+        <div class="status success">🎉 تمام کارگاه‌ها با موفقیت ارسال شد! از همراهی شما متشکریم.</div>
     </div>
 </div>
 
 <script>
-// ===== تنظیمات =====
+// ========== تنظیمات ==========
 const WORKER_URL = "https://exam-worker.mosk62013.workers.dev";  // آدرس Worker خود را اینجا وارد کنید
-
 const params = new URLSearchParams(window.location.search);
 const examId = params.get('exam_id');
 const userId = params.get('user_id');
@@ -95,60 +123,136 @@ const studentName = decodeURIComponent(params.get('name') || 'کاربر');
 const token = params.get('token');
 const ts = params.get('ts');
 
-document.getElementById('info').innerHTML = `<h3>👤 ${studentName}</h3><p>📚 آزمون ${examId}</p>`;
+document.getElementById('studentInfo').innerHTML = `<h3>👤 ${studentName}</h3><p>📚 آزمون ${examId}</p>`;
 
-// ===== متغیرها =====
+// ========== متغیرها ==========
+let workshops = [];           // لیست کارگاه‌های این دانشجو
+let currentIndex = 0;        // کارگاه جاری (0, 1, 2)
+let currentWorkshop = null;   // کارگاه فعلی
+let currentAnswers = {};      // پاسخ‌های سوالات کارگاه فعلی
+
+// متغیرهای ضبط
 let mediaRecorder = null;
-let chunks = [];
+let recordedChunks = [];
 let seconds = 0;
 let timerInterval = null;
 let screenStream = null;
 let micStream = null;
 let webcamElement = null;
 
-// ===== مرحله 1: گرفتن دسترسی میکروفون و وبکم =====
-document.getElementById('permBtn').onclick = async function() {
+// ========== دریافت کارگاه‌ها از Worker ==========
+async function loadWorkshops() {
+    document.getElementById('workshopContainer').innerHTML = '<div class="status step">⏳ در حال بارگیری کارگاه‌ها...</div>';
+    
     try {
-        document.getElementById('status').innerHTML = '<div class="info blue">⏳ درخواست دسترسی...</div>';
+        const response = await fetch(`${WORKER_URL}/api/random-workshops`);
+        if (!response.ok) throw new Error('خطا در دریافت کارگاه‌ها');
+        workshops = await response.json();
+        console.log("کارگاه‌های دریافت شده:", workshops);
         
-        // گرفتن دسترسی به وبکم و میکروفون
-        micStream = await navigator.mediaDevices.getUserMedia({ 
-            video: true, 
-            audio: true 
-        });
+        if (!workshops || workshops.length === 0) {
+            throw new Error('هیچ کارگاهی یافت نشد');
+        }
         
-        // نمایش وبکم شناور در گوشه صفحه
+        // نمایش اولین کارگاه
+        showCurrentWorkshop();
+    } catch(err) {
+        document.getElementById('workshopContainer').innerHTML = `<div class="status warning">❌ خطا: ${err.message}</div>`;
+    }
+}
+
+// ========== نمایش کارگاه فعلی با سوالات ==========
+function showCurrentWorkshop() {
+    if (currentIndex >= workshops.length) {
+        // تمام کارگاه‌ها تمام شد
+        document.getElementById('workshopContainer').style.display = 'none';
+        document.getElementById('completeSection').style.display = 'block';
+        return;
+    }
+    
+    currentWorkshop = workshops[currentIndex];
+    console.log("نمایش کارگاه:", currentWorkshop);
+    
+    let questions = [];
+    try {
+        if (typeof currentWorkshop.questions_json === 'string') {
+            questions = JSON.parse(currentWorkshop.questions_json);
+        } else if (currentWorkshop.questions_json) {
+            questions = currentWorkshop.questions_json;
+        } else {
+            questions = [];
+        }
+    } catch(e) {
+        console.error("خطا در parse سوالات:", e);
+        questions = [];
+    }
+    
+    let html = `
+        <div class="workshop-card">
+            <h3>📚 کارگاه ${currentIndex + 1} از ${workshops.length}: ${currentWorkshop.title}</h3>
+            <p><strong>رنج ${currentWorkshop.range_type}</strong></p>
+    `;
+    
+    if (questions.length === 0) {
+        html += `<p class="status warning">⚠️ سوالات این کارگاه یافت نشد</p>`;
+    } else {
+        for (let i = 0; i < questions.length; i++) {
+            html += `
+                <div class="question">
+                    <p><strong>سوال ${i+1}:</strong> ${questions[i]}</p>
+                    <textarea id="ans_${i}" rows="3" placeholder="پاسخ خود را بنویسید..." style="width:100%;"></textarea>
+                </div>
+            `;
+        }
+    }
+    
+    html += `
+            <button id="startRecordBtn" class="info-btn">🎬 شروع ضبط برای این کارگاه</button>
+        </div>
+    `;
+    
+    document.getElementById('workshopContainer').innerHTML = html;
+    document.getElementById('recordingSection').style.display = 'none';
+    document.getElementById('nextSection').style.display = 'none';
+    
+    // اتصال دکمه شروع ضبط
+    document.getElementById('startRecordBtn').onclick = startRecordingProcess;
+}
+
+// ========== گرفتن دسترسی و شروع ضبط ==========
+async function startRecordingProcess() {
+    // جمع‌آوری پاسخ‌های سوالات
+    const questions = JSON.parse(currentWorkshop.questions_json || '[]');
+    for (let i = 0; i < questions.length; i++) {
+        const textarea = document.getElementById(`ans_${i}`);
+        if (textarea) {
+            currentAnswers[`q${i+1}`] = textarea.value;
+        }
+    }
+    
+    try {
+        // گرفتن دسترسی وبکم و میکروفون
+        micStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        
+        // نمایش وبکم شناور
+        if (webcamElement) webcamElement.remove();
         webcamElement = document.createElement('video');
         webcamElement.srcObject = micStream;
         webcamElement.autoplay = true;
         webcamElement.muted = true;
-        webcamElement.style.position = 'fixed';
-        webcamElement.style.bottom = '20px';
-        webcamElement.style.right = '20px';
-        webcamElement.style.width = '160px';
-        webcamElement.style.height = '120px';
-        webcamElement.style.borderRadius = '10px';
-        webcamElement.style.border = '3px solid #e94560';
-        webcamElement.style.zIndex = '9999';
+        webcamElement.className = 'webcam-preview';
         document.body.appendChild(webcamElement);
         
-        document.getElementById('step1Div').style.display = 'none';
-        document.getElementById('step2Div').style.display = 'block';
-        document.getElementById('status').innerHTML = '<div class="info success">✅ دسترسی داده شد!</div>';
-        document.getElementById('permBtn').style.display = 'none';
-        document.getElementById('startBtn').style.display = 'inline-block';
+        // شروع ضبط صفحه
+        await startScreenRecording();
         
     } catch(err) {
-        document.getElementById('status').innerHTML = `<div class="info warning">❌ خطا: ${err.message}</div>`;
+        alert('خطا در دسترسی به وبکم: ' + err.message);
     }
-};
+}
 
-// ===== مرحله 2: شروع ضبط صفحه =====
-document.getElementById('startBtn').onclick = async function() {
+async function startScreenRecording() {
     try {
-        document.getElementById('status').innerHTML = '<div class="info blue">⏳ انتخاب صفحه...</div>';
-        
-        // گرفتن صفحه با صدا
         screenStream = await navigator.mediaDevices.getDisplayMedia({
             video: { width: 854, height: 480, frameRate: 15 },
             audio: true
@@ -156,34 +260,28 @@ document.getElementById('startBtn').onclick = async function() {
         
         // ترکیب ویدیوی صفحه و صدای میکروفون
         const tracks = [...screenStream.getVideoTracks()];
-        if (micStream) {
+        if (micStream && micStream.getAudioTracks().length > 0) {
             tracks.push(...micStream.getAudioTracks());
         }
-        tracks.push(...screenStream.getAudioTracks());
         const finalStream = new MediaStream(tracks);
         
         mediaRecorder = new MediaRecorder(finalStream, { videoBitsPerSecond: 500000 });
-        chunks = [];
+        recordedChunks = [];
         
         mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) chunks.push(e.data);
+            if (e.data.size > 0) recordedChunks.push(e.data);
         };
         
         mediaRecorder.onstop = () => {
-            const blob = new Blob(chunks, { type: 'video/webm' });
-            if (blob.size > 20 * 1024 * 1024) {
-                document.getElementById('status').innerHTML = '<div class="info warning">❌ حجم فیلم بیشتر از 20 مگابایت است</div>';
-                return;
-            }
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
             uploadVideo(blob);
             if (screenStream) screenStream.getTracks().forEach(t => t.stop());
         };
         
         mediaRecorder.start(1000);
         
-        // تایمر
+        // تایمر 5 دقیقه‌ای
         seconds = 0;
-        document.getElementById('timer').style.display = 'block';
         timerInterval = setInterval(() => {
             seconds++;
             let mins = Math.floor(seconds / 60);
@@ -197,25 +295,36 @@ document.getElementById('startBtn').onclick = async function() {
             }
         }, 1000);
         
-        document.getElementById('startBtn').style.display = 'none';
-        document.getElementById('stopBtn').style.display = 'inline-block';
-        document.getElementById('status').innerHTML = '<div class="info success">🔴 در حال ضبط... (حداکثر ۵ دقیقه)</div>';
+        // نمایش بخش ضبط
+        document.getElementById('workshopContainer').style.display = 'none';
+        document.getElementById('recordingSection').style.display = 'block';
+        document.getElementById('recordingStatus').innerHTML = '<div class="status success">🔴 در حال ضبط... (حداکثر ۵ دقیقه)</div>';
+        
+        // دکمه توقف
+        document.getElementById('stopRecordBtn').onclick = () => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                clearInterval(timerInterval);
+                document.getElementById('recordingStatus').innerHTML = '<div class="status step">⏳ در حال ارسال...</div>';
+            }
+        };
+        
+        // اگر کاربر پنجره اشتراک‌گذاری را ببندد
+        if (screenStream.getVideoTracks()[0]) {
+            screenStream.getVideoTracks()[0].onended = () => {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                    clearInterval(timerInterval);
+                }
+            };
+        }
         
     } catch(err) {
-        document.getElementById('status').innerHTML = `<div class="info warning">❌ خطا: ${err.message}</div>`;
+        document.getElementById('recordingStatus').innerHTML = `<div class="status warning">❌ خطا: ${err.message}</div>`;
     }
-};
+}
 
-// ===== پایان ضبط =====
-document.getElementById('stopBtn').onclick = function() {
-    if (mediaRecorder && mediaRecorder.state === 'recording') {
-        mediaRecorder.stop();
-        clearInterval(timerInterval);
-        document.getElementById('status').innerHTML = '<div class="info blue">⏳ در حال ارسال...</div>';
-    }
-};
-
-// ===== آپلود ویدیو =====
+// ========== آپلود ویدیو ==========
 async function uploadVideo(blob) {
     const formData = new FormData();
     formData.append('video', blob);
@@ -224,7 +333,10 @@ async function uploadVideo(blob) {
     formData.append('student_name', studentName);
     formData.append('token', token);
     formData.append('ts', ts);
-    formData.append('answers', JSON.stringify({}));
+    formData.append('workshop_id', currentWorkshop.id);
+    formData.append('workshop_title', currentWorkshop.title);
+    formData.append('answers', JSON.stringify(currentAnswers));
+    formData.append('workshop_index', currentIndex);
     
     const xhr = new XMLHttpRequest();
     xhr.upload.onprogress = (e) => {
@@ -235,21 +347,36 @@ async function uploadVideo(blob) {
     };
     xhr.onload = () => {
         if (xhr.status === 200) {
-            document.getElementById('status').innerHTML = '<div class="info success">✅ فیلم ارسال شد! صفحه را ببندید.</div>';
-            document.getElementById('stopBtn').style.display = 'none';
             // بستن وبکم
             if (webcamElement) webcamElement.remove();
             if (micStream) micStream.getTracks().forEach(t => t.stop());
+            micStream = null;
+            
+            // نمایش بخش بعد
+            document.getElementById('recordingSection').style.display = 'none';
+            document.getElementById('nextSection').style.display = 'block';
+            
+            // دکمه کارگاه بعدی
+            document.getElementById('nextWorkshopBtn').onclick = () => {
+                currentIndex++;
+                currentAnswers = {};
+                document.getElementById('workshopContainer').style.display = 'block';
+                document.getElementById('nextSection').style.display = 'none';
+                showCurrentWorkshop();
+            };
         } else {
-            document.getElementById('status').innerHTML = '<div class="info warning">❌ خطا در ارسال</div>';
+            document.getElementById('recordingStatus').innerHTML = '<div class="status warning">❌ خطا در ارسال</div>';
         }
     };
     xhr.onerror = () => {
-        document.getElementById('status').innerHTML = '<div class="info warning">❌ خطای شبکه</div>';
+        document.getElementById('recordingStatus').innerHTML = '<div class="status warning">❌ خطای شبکه</div>';
     };
     xhr.open('POST', WORKER_URL + '/upload');
     xhr.send(formData);
 }
+
+// ========== شروع ==========
+loadWorkshops();
 </script>
 </body>
 </html>
