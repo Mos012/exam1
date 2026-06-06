@@ -254,7 +254,7 @@ async function startRecordingProcess() {
 async function startScreenRecording() {
     try {
         screenStream = await navigator.mediaDevices.getDisplayMedia({
-            video: { width: 854, height: 480, frameRate: 15 },
+            video: { width: 960, height: 540, frameRate: { ideal: 12 } },
             audio: true
         });
         
